@@ -837,6 +837,18 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
             return dosum
 
     def reference_value(self, o):
+        print("----")
+        print("Call reference_value(self, ", o, ")")
+        for (w, v) in zip(self._w, self._v):
+            print("v=", v)
+            print("o=", o)
+            print("w=", w)
+            if o.ufl_operands[0] == w and isinstance(v, FormArgument):
+                # Case: d/dt [w + t v]
+                print("return ", v)
+                return v
+        print("Didn't differentiate ", o.ufl_operands[0])
+        return self.independent_terminal(o)
         error("Currently no support for ReferenceValue in CoefficientDerivative.")
         # TODO: This is implementable for regular derivative(M(f),f,v)
         #       but too messy if customized coefficient derivative
@@ -854,6 +866,32 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
         #     return self.independent_terminal(o)
 
     def reference_grad(self, o):
+        print("----")
+        print("Call reference_grad(self, ", o, ")")
+        ngrads = 0
+        while isinstance(o, ReferenceGrad):
+            o, = o.ufl_operands
+            ngrads += 1
+        if not isinstance(o, ReferenceValue):
+            error("Expecting gradient of a FormArgument, not %s" % ufl_err_str(o))
+
+        def apply_grads(f):
+            for i in range(ngrads):
+                f = ReferenceGrad(f)
+            return f
+
+        # Find o among all w without any indexing, which makes this
+        # easy
+        for (w, v) in zip(self._w, self._v):
+            print("v=", v)
+            print("o=", o)
+            print("w=", w)
+            if o.ufl_operands[0] == w and isinstance(v.ufl_operands[0], FormArgument):
+                # Case: d/dt [w + t v]
+                print("return ", apply_grads(v))
+                return apply_grads(v)
+        print("Didn't differentiate ", o.ufl_operands[0])
+        return self.independent_terminal(o)
         error("Currently no support for ReferenceGrad in CoefficientDerivative.")
         # TODO: This is implementable for regular derivative(M(f),f,v)
         #       but too messy if customized coefficient derivative
