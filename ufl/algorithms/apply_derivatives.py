@@ -843,7 +843,7 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
             print("v=", v)
             print("o=", o)
             print("w=", w)
-            if o.ufl_operands[0] == w and isinstance(v, FormArgument):
+            if o.ufl_operands[0] == w and isinstance(v.ufl_operands[0], FormArgument):
                 # Case: d/dt [w + t v]
                 print("return ", v)
                 return v
