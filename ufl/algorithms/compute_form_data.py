@@ -258,7 +258,9 @@ def compute_form_data(form,
     # TODO: Refactor this, it's rather opaque what this does
     # TODO: Is self.original_form.ufl_domains() right here?
     #       It will matter when we start including 'num_domains' in ufc form.
-    form = group_form_integrals(form, self.original_form.ufl_domains())
+    key = 'shape'
+    if key not in self.original_form._cache:
+        form = group_form_integrals(form, self.original_form.ufl_domains())
 
     # Estimate polynomial degree of integrands now, before applying
     # any pullbacks and geometric lowering.  Otherwise quad degrees
@@ -266,18 +268,21 @@ def compute_form_data(form,
     if do_estimate_degrees:
         form = attach_estimated_degrees(form)
 
-    if do_apply_function_pullbacks:
-        # Rewrite coefficients and arguments in terms of their
-        # reference cell values with Piola transforms and symmetry
-        # transforms injected where needed.
-        # Decision: Not supporting grad(dolfin.Expression) without a
-        #           Domain.  Current dolfin works if Expression has a
-        #           cell but this should be changed to a mesh.
-        form = apply_function_pullbacks(form)
+
+    if key not in self.original_form._cache:
+        if do_apply_function_pullbacks:
+            # Rewrite coefficients and arguments in terms of their
+            # reference cell values with Piola transforms and symmetry
+            # transforms injected where needed.
+            # Decision: Not supporting grad(dolfin.Expression) without a
+            #           Domain.  Current dolfin works if Expression has a
+            #           cell but this should be changed to a mesh.
+            form = apply_function_pullbacks(form)
 
     # Scale integrals to reference cell frames
-    if do_apply_integral_scaling:
-        form = apply_integral_scaling(form)
+    if key not in self.original_form._cache:
+        if do_apply_integral_scaling:
+            form = apply_integral_scaling(form)
 
     # Apply default restriction to fully continuous terminals
     if do_apply_default_restrictions:
@@ -303,6 +308,7 @@ def compute_form_data(form,
             # Lower derivatives that may have appeared
             form = apply_derivatives(form)
 
+    print("Final form", form)
     # Propagate restrictions to terminals
     if do_apply_restrictions:
         form = apply_restrictions(form)
