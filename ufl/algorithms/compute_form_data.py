@@ -22,6 +22,9 @@ raw input form given by a user."""
 
 from itertools import chain
 
+from ufl.algorithms.replace import replace
+from ufl.geometry import SpatialCoordinate
+from ufl.classes import ReferenceValue
 from ufl.log import error, info
 from ufl.utils.sequences import max_degree
 
@@ -35,7 +38,7 @@ from ufl.algorithms.check_arities import check_form_arity
 # These are the main symbolic processing steps:
 from ufl.algorithms.apply_function_pullbacks import apply_function_pullbacks
 from ufl.algorithms.apply_algebra_lowering import apply_algebra_lowering
-from ufl.algorithms.apply_derivatives import apply_derivatives
+from ufl.algorithms.apply_derivatives import apply_derivatives, apply_spatial_derivatives, apply_functional_derivatives
 from ufl.algorithms.apply_integral_scaling import apply_integral_scaling
 from ufl.algorithms.apply_geometry_lowering import apply_geometry_lowering
 from ufl.algorithms.apply_restrictions import apply_restrictions, apply_default_restrictions
@@ -225,6 +228,7 @@ def compute_form_data(form,
                       do_apply_default_restrictions=True,
                       do_apply_restrictions=True,
                       do_estimate_degrees=True,
+                      coordinate_is_coefficient=True
                       ):
 
     # TODO: Move this to the constructor instead
@@ -252,37 +256,39 @@ def compute_form_data(form,
     # example coefficient derivatives are more complicated to derive
     # after coefficients are rewritten, and in particular for
     # user-defined coefficient relations it just gets too messy
-    form = apply_derivatives(form)
+    form = apply_spatial_derivatives(form)
 
     # --- Group form integrals
     # TODO: Refactor this, it's rather opaque what this does
     # TODO: Is self.original_form.ufl_domains() right here?
     #       It will matter when we start including 'num_domains' in ufc form.
-    key = 'shape'
-    if key not in self.original_form._cache:
-        form = group_form_integrals(form, self.original_form.ufl_domains())
+    # key = 'shape'
+    # if key not in self.original_form._cache:
+    form = group_form_integrals(form, self.original_form.ufl_domains())
 
     # Estimate polynomial degree of integrands now, before applying
     # any pullbacks and geometric lowering.  Otherwise quad degrees
     # blow up horrifically.
-    if do_estimate_degrees:
-        form = attach_estimated_degrees(form)
+    # if do_estimate_degrees:
+    #     form = attach_estimated_degrees(form)
 
 
-    if key not in self.original_form._cache:
-        if do_apply_function_pullbacks:
-            # Rewrite coefficients and arguments in terms of their
-            # reference cell values with Piola transforms and symmetry
-            # transforms injected where needed.
-            # Decision: Not supporting grad(dolfin.Expression) without a
-            #           Domain.  Current dolfin works if Expression has a
-            #           cell but this should be changed to a mesh.
-            form = apply_function_pullbacks(form)
+    # if key not in self.original_form._cache:
+    if do_apply_function_pullbacks:
+        # Rewrite coefficients and arguments in terms of their
+        # reference cell values with Piola transforms and symmetry
+        # transforms injected where needed.
+        # Decision: Not supporting grad(dolfin.Expression) without a
+        #           Domain.  Current dolfin works if Expression has a
+        #           cell but this should be changed to a mesh.
+        form = apply_function_pullbacks(form)
 
     # Scale integrals to reference cell frames
-    if key not in self.original_form._cache:
-        if do_apply_integral_scaling:
-            form = apply_integral_scaling(form)
+    # if key not in self.original_form._cache:
+    print("form before scaling %s" % (form))
+    if do_apply_integral_scaling:
+        form = apply_integral_scaling(form)
+    print("form after scaling %s" % (form))
 
     # Apply default restriction to fully continuous terminals
     if do_apply_default_restrictions:
@@ -299,16 +305,23 @@ def compute_form_data(form,
     # generate new derivatives or rewrite expressions inside
     # derivatives
     if do_apply_function_pullbacks or do_apply_geometry_lowering:
-        form = apply_derivatives(form)
+        form = apply_spatial_derivatives(form)
 
         # Neverending story: apply_derivatives introduces new Jinvs,
         # which needs more geometry lowering
         if do_apply_geometry_lowering:
             form = apply_geometry_lowering(form, preserve_geometry_types)
             # Lower derivatives that may have appeared
-            form = apply_derivatives(form)
+            form = apply_spatial_derivatives(form)
 
+    print("Before domain replacement:", form)
+    if coordinate_is_coefficient:
+        form = replace(form, {SpatialCoordinate(form.ufl_domain()): ReferenceValue(form.ufl_domain().coordinates)}, replace_in_derivative=True)
+    print("After domain replacement:", form)
+    form = apply_functional_derivatives(form)
     print("Final form", form)
+    if do_estimate_degrees:
+        form = attach_estimated_degrees(form)
     # Propagate restrictions to terminals
     if do_apply_restrictions:
         form = apply_restrictions(form)

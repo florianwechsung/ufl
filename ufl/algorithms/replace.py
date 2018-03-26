@@ -29,8 +29,9 @@ from ufl.algorithms.analysis import has_exact_type
 
 
 class Replacer(MultiFunction):
-    def __init__(self, mapping):
+    def __init__(self, mapping, replace_in_derivative=False):
         MultiFunction.__init__(self)
+        self.replace_in_derivative = replace_in_derivative
         self._mapping = mapping
         if not all(k._ufl_is_terminal_ for k in mapping.keys()):
             error("This implementation can only replace Terminal objects.")
@@ -47,10 +48,17 @@ class Replacer(MultiFunction):
             return e
 
     def coefficient_derivative(self, o):
-        error("Derivatives should be applied before executing replace.")
+        ocopy = o
+        if self.replace_in_derivative:
+            o_ = o.ufl_operands
+            ocopy.ufl_operands = (map_integrand_dags(self, o_[0]), o_[1], o_[2], o_[3])
+            return ocopy
+        else:
+            error("Derivatives should be applied before executing replace.")
 
 
-def replace(e, mapping):
+
+def replace(e, mapping, replace_in_derivative=False):
     """Replace terminal objects in expression.
 
     @param e:
@@ -64,6 +72,6 @@ def replace(e, mapping):
     if has_exact_type(e, CoefficientDerivative):
         # Hack to avoid circular dependencies
         from ufl.algorithms.ad import expand_derivatives
-        e = expand_derivatives(e)
+        e = expand_derivatives(e, expand_spatial_only=replace_in_derivative)
 
-    return map_integrand_dags(Replacer(mapping2), e)
+    return map_integrand_dags(Replacer(mapping2, replace_in_derivative=replace_in_derivative), e)

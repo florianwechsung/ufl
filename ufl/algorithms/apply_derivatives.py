@@ -843,7 +843,7 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
             print("v=", v)
             print("o=", o)
             print("w=", w)
-            if o.ufl_operands[0] == w and isinstance(v.ufl_operands[0], FormArgument):
+            if o == w and isinstance(v.ufl_operands[0], FormArgument):
                 # Case: d/dt [w + t v]
                 print("return ", v)
                 return v
@@ -1109,4 +1109,132 @@ class DerivativeRuleDispatcher(MultiFunction):
 
 def apply_derivatives(expression):
     rules = DerivativeRuleDispatcher()
+    return map_integrand_dags(rules, expression)
+
+class SpatialDerivativeRuleDispatcher(MultiFunction):
+    def __init__(self):
+        MultiFunction.__init__(self)
+
+    def terminal(self, o):
+        return o
+
+    def derivative(self, o):
+        error("Missing derivative handler for {0}.".format(type(o).__name__))
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def grad(self, o, f):
+        rules = GradRuleset(o.ufl_shape[-1])
+        return map_expr_dag(rules, f)
+
+    def reference_grad(self, o, f):
+        rules = ReferenceGradRuleset(o.ufl_shape[-1])  # FIXME: Look over this and test better.
+        return map_expr_dag(rules, f)
+
+    def variable_derivative(self, o, f, dummy_v):
+        return o
+    #     rules = VariableRuleset(o.ufl_operands[1])
+    #     return map_expr_dag(rules, f)
+
+    def coefficient_derivative(self, o, f, dummy_w, dummy_v, dummy_cd):
+        return o
+    #     dummy, w, v, cd = o.ufl_operands
+    #     rules = GateauxDerivativeRuleset(w, v, cd)
+    #     return map_expr_dag(rules, f)
+
+    def indexed(self, o, Ap, ii):  # TODO: (Partially) duplicated in generic rules
+        # Reuse if untouched
+        if Ap is o.ufl_operands[0]:
+            return o
+
+        # Untangle as_tensor(C[kk], jj)[ii] -> C[ll] to simplify
+        # resulting expression
+        if isinstance(Ap, ComponentTensor):
+            B, jj = Ap.ufl_operands
+            if isinstance(B, Indexed):
+                C, kk = B.ufl_operands
+
+                kk = list(kk)
+                if all(j in kk for j in jj):
+                    Cind = list(kk)
+                    for i, j in zip(ii, jj):
+                        Cind[kk.index(j)] = i
+                    return Indexed(C, MultiIndex(tuple(Cind)))
+
+        # Otherwise a more generic approach
+        r = len(Ap.ufl_shape) - len(ii)
+        if r:
+            kk = indices(r)
+            op = Indexed(Ap, MultiIndex(ii.indices() + kk))
+            op = as_tensor(op, kk)
+        else:
+            op = Indexed(Ap, ii)
+        return op
+
+def apply_spatial_derivatives(expression):
+    rules = SpatialDerivativeRuleDispatcher()
+    return map_integrand_dags(rules, expression)
+
+class FunctionalDerivativeRuleDispatcher(MultiFunction):
+    def __init__(self):
+        MultiFunction.__init__(self)
+
+    def terminal(self, o):
+        return o
+
+    def derivative(self, o):
+        error("Missing derivative handler for {0}.".format(type(o).__name__))
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def grad(self, o, f):
+        # rules = GradRuleset(o.ufl_shape[-1])
+        # return map_expr_dag(rules, f)
+        return o
+
+    def reference_grad(self, o, f):
+        # rules = ReferenceGradRuleset(o.ufl_shape[-1])  # FIXME: Look over this and test better.
+        # return map_expr_dag(rules, f)
+        return o
+
+    def variable_derivative(self, o, f, dummy_v):
+        rules = VariableRuleset(o.ufl_operands[1])
+        return map_expr_dag(rules, f)
+
+    def coefficient_derivative(self, o, f, dummy_w, dummy_v, dummy_cd):
+        dummy, w, v, cd = o.ufl_operands
+        rules = GateauxDerivativeRuleset(w, v, cd)
+        return map_expr_dag(rules, f)
+
+    def indexed(self, o, Ap, ii):  # TODO: (Partially) duplicated in generic rules
+        # Reuse if untouched
+        if Ap is o.ufl_operands[0]:
+            return o
+
+        # Untangle as_tensor(C[kk], jj)[ii] -> C[ll] to simplify
+        # resulting expression
+        if isinstance(Ap, ComponentTensor):
+            B, jj = Ap.ufl_operands
+            if isinstance(B, Indexed):
+                C, kk = B.ufl_operands
+
+                kk = list(kk)
+                if all(j in kk for j in jj):
+                    Cind = list(kk)
+                    for i, j in zip(ii, jj):
+                        Cind[kk.index(j)] = i
+                    return Indexed(C, MultiIndex(tuple(Cind)))
+
+        # Otherwise a more generic approach
+        r = len(Ap.ufl_shape) - len(ii)
+        if r:
+            kk = indices(r)
+            op = Indexed(Ap, MultiIndex(ii.indices() + kk))
+            op = as_tensor(op, kk)
+        else:
+            op = Indexed(Ap, ii)
+        return op
+
+def apply_functional_derivatives(expression):
+    rules = FunctionalDerivativeRuleDispatcher()
     return map_integrand_dags(rules, expression)

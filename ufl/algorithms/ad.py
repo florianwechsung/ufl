@@ -22,10 +22,10 @@
 
 from ufl.log import warning
 from ufl.algorithms.apply_algebra_lowering import apply_algebra_lowering
-from ufl.algorithms.apply_derivatives import apply_derivatives
+from ufl.algorithms.apply_derivatives import apply_derivatives, apply_spatial_derivatives
 
 
-def expand_derivatives(form, **kwargs):
+def expand_derivatives(form, expand_spatial_only=False, **kwargs):
     """Expand all derivatives of expr.
 
     In the returned expression g which is mathematically
@@ -42,6 +42,9 @@ def expand_derivatives(form, **kwargs):
     form = apply_algebra_lowering(form)
 
     # Apply differentiation
-    form = apply_derivatives(form)
+    if expand_spatial_only:
+        form = apply_spatial_derivatives(form)
+    else:
+        form = apply_derivatives(form)
 
     return form
