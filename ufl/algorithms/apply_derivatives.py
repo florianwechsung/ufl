@@ -50,6 +50,8 @@ from ufl.algorithms.map_integrands import map_integrand_dags
 
 from ufl.checks import is_cellwise_constant
 
+from ufl.differentiation import CoefficientDerivative
+
 # TODO: Add more rulesets?
 # - DivRuleset
 # - CurlRuleset
@@ -837,17 +839,17 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
             return dosum
 
     def reference_value(self, o):
-        print("----")
-        print("Call reference_value(self, ", o, ")")
+        # print("----")
+        # print("Call reference_value(self, ", o, ")")
         for (w, v) in zip(self._w, self._v):
-            print("v=", v)
-            print("o=", o)
-            print("w=", w)
+            # print("v=", v)
+            # print("o=", o)
+            # print("w=", w)
             if o == w and isinstance(v.ufl_operands[0], FormArgument):
                 # Case: d/dt [w + t v]
-                print("return ", v)
+                # print("return ", v)
                 return v
-        print("Didn't differentiate ", o.ufl_operands[0])
+        # print("Didn't differentiate ", o.ufl_operands[0])
         return self.independent_terminal(o)
         error("Currently no support for ReferenceValue in CoefficientDerivative.")
         # TODO: This is implementable for regular derivative(M(f),f,v)
@@ -866,13 +868,13 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
         #     return self.independent_terminal(o)
 
     def reference_grad(self, o):
-        print("----")
-        print("Call reference_grad(self, ", o, ")")
+        # print("----")
+        # print("Call reference_grad(self, ", o, ")")
         ngrads = 0
         while isinstance(o, ReferenceGrad):
             o, = o.ufl_operands
             ngrads += 1
-        if not isinstance(o, ReferenceValue):
+        if not isinstance(o.ufl_operands[0], FormArgument):
             error("Expecting gradient of a FormArgument, not %s" % ufl_err_str(o))
 
         def apply_grads(f):
@@ -883,14 +885,14 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
         # Find o among all w without any indexing, which makes this
         # easy
         for (w, v) in zip(self._w, self._v):
-            print("v=", v)
-            print("o=", o)
-            print("w=", w)
-            if o.ufl_operands[0] == w and isinstance(v.ufl_operands[0], FormArgument):
+            # print("v=", v)
+            # print("o=", o)
+            # print("w=", w)
+            if o == w and isinstance(v.ufl_operands[0], FormArgument):
                 # Case: d/dt [w + t v]
-                print("return ", apply_grads(v))
+                # print("return ", apply_grads(v))
                 return apply_grads(v)
-        print("Didn't differentiate ", o.ufl_operands[0])
+        # print("Didn't differentiate ", o)
         return self.independent_terminal(o)
         error("Currently no support for ReferenceGrad in CoefficientDerivative.")
         # TODO: This is implementable for regular derivative(M(f),f,v)
@@ -1137,10 +1139,8 @@ class SpatialDerivativeRuleDispatcher(MultiFunction):
     #     return map_expr_dag(rules, f)
 
     def coefficient_derivative(self, o, f, dummy_w, dummy_v, dummy_cd):
-        return o
-    #     dummy, w, v, cd = o.ufl_operands
-    #     rules = GateauxDerivativeRuleset(w, v, cd)
-    #     return map_expr_dag(rules, f)
+        o_ = o.ufl_operands
+        return CoefficientDerivative(map_expr_dag(self, o_[0]), o_[1], o_[2], o_[3])
 
     def indexed(self, o, Ap, ii):  # TODO: (Partially) duplicated in generic rules
         # Reuse if untouched

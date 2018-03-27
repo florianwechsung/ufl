@@ -26,17 +26,19 @@ from ufl.constantvalue import as_ufl
 from ufl.corealg.multifunction import MultiFunction
 from ufl.algorithms.map_integrands import map_integrand_dags
 from ufl.algorithms.analysis import has_exact_type
+from ufl.geometry import SpatialCoordinate
 
 
 class Replacer(MultiFunction):
-    def __init__(self, mapping, replace_in_derivative=False):
+    def __init__(self, mapping, replace_in_derivative=False, coords=None):
         MultiFunction.__init__(self)
         self.replace_in_derivative = replace_in_derivative
         self._mapping = mapping
-        if not all(k._ufl_is_terminal_ for k in mapping.keys()):
-            error("This implementation can only replace Terminal objects.")
+        # if not all(k._ufl_is_terminal_ for k in mapping.keys()):
+        #     error("This implementation can only replace Terminal objects.")
         if not all(k.ufl_shape == v.ufl_shape for k, v in mapping.items()):
             error("Replacement expressions must have the same shape as what they replace.")
+        self.coords = coords
 
     expr = MultiFunction.reuse_if_untouched
 
@@ -56,9 +58,18 @@ class Replacer(MultiFunction):
         else:
             error("Derivatives should be applied before executing replace.")
 
+    def reference_value(self, o):
+        v, = o.ufl_operands
+        if self.coords is not None and v == self.coords:
+            return SpatialCoordinate(o.ufl_domain())
+        else:
+            res = o
+            res.ufl_operands = (map_integrand_dags(self, v),)
+            return res
 
 
-def replace(e, mapping, replace_in_derivative=False):
+
+def replace(e, mapping, replace_in_derivative=False, coords=None):
     """Replace terminal objects in expression.
 
     @param e:
@@ -74,4 +85,4 @@ def replace(e, mapping, replace_in_derivative=False):
         from ufl.algorithms.ad import expand_derivatives
         e = expand_derivatives(e, expand_spatial_only=replace_in_derivative)
 
-    return map_integrand_dags(Replacer(mapping2, replace_in_derivative=replace_in_derivative), e)
+    return map_integrand_dags(Replacer(mapping2, replace_in_derivative=replace_in_derivative, coords=coords), e)

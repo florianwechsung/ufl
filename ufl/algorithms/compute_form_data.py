@@ -252,10 +252,6 @@ def compute_form_data(form,
     # compilers need to handle
     form = apply_algebra_lowering(form)
 
-    # Apply differentiation before function pullbacks, because for
-    # example coefficient derivatives are more complicated to derive
-    # after coefficients are rewritten, and in particular for
-    # user-defined coefficient relations it just gets too messy
     form = apply_spatial_derivatives(form)
 
     # --- Group form integrals
@@ -285,10 +281,8 @@ def compute_form_data(form,
 
     # Scale integrals to reference cell frames
     # if key not in self.original_form._cache:
-    print("form before scaling %s" % (form))
     if do_apply_integral_scaling:
         form = apply_integral_scaling(form)
-    print("form after scaling %s" % (form))
 
     # Apply default restriction to fully continuous terminals
     if do_apply_default_restrictions:
@@ -314,12 +308,21 @@ def compute_form_data(form,
             # Lower derivatives that may have appeared
             form = apply_spatial_derivatives(form)
 
-    print("Before domain replacement:", form)
+
+    # FIXME: Hack to allow for shape derivatives: 
+    # we replace the SpatialCoordinate with mesh.coordinates (which is a Coefficient)
+    # in order to be able to differentiate it
+
     if coordinate_is_coefficient:
         form = replace(form, {SpatialCoordinate(form.ufl_domain()): ReferenceValue(form.ufl_domain().coordinates)}, replace_in_derivative=True)
-    print("After domain replacement:", form)
+    # Now apply the Gateaux derivative w.r.t. the Coefficient
     form = apply_functional_derivatives(form)
-    print("Final form", form)
+    # FIXME: Undo the replace again in case the original form did not contain
+    # mesh.coordinates (TSFC gets confused if the new form suddenly has an extra Coefficient)
+    if coordinate_is_coefficient and form.ufl_domain().coordinates not in self.original_form.coefficients():
+        form = replace(form, {ReferenceValue(form.ufl_domain().coordinates): SpatialCoordinate(form.ufl_domain())},
+                       replace_in_derivative=True,
+                       coords=form.ufl_domain().coordinates)
     if do_estimate_degrees:
         form = attach_estimated_degrees(form)
     # Propagate restrictions to terminals
