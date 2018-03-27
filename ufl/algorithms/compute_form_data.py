@@ -314,15 +314,21 @@ def compute_form_data(form,
     # in order to be able to differentiate it
 
     if coordinate_is_coefficient:
-        form = replace(form, {SpatialCoordinate(form.ufl_domain()): ReferenceValue(form.ufl_domain().coordinates)}, replace_in_derivative=True)
+        for domain in form.ufl_domains():
+            form = replace(form, {SpatialCoordinate(domain): ReferenceValue(domain.coordinates)},
+                           replace_in_derivative=True,
+                           coords=domain.coordinates)
     # Now apply the Gateaux derivative w.r.t. the Coefficient
     form = apply_functional_derivatives(form)
     # FIXME: Undo the replace again in case the original form did not contain
     # mesh.coordinates (TSFC gets confused if the new form suddenly has an extra Coefficient)
-    if coordinate_is_coefficient and form.ufl_domain().coordinates not in self.original_form.coefficients():
-        form = replace(form, {ReferenceValue(form.ufl_domain().coordinates): SpatialCoordinate(form.ufl_domain())},
-                       replace_in_derivative=True,
-                       coords=form.ufl_domain().coordinates)
+
+    if coordinate_is_coefficient:
+        for domain in form.ufl_domains():
+            if domain.coordinates not in self.original_form.coefficients():
+                form = replace(form, {ReferenceValue(domain.coordinates): SpatialCoordinate(domain)},
+                               replace_in_derivative=True,
+                               coords=domain.coordinates)
     if do_estimate_degrees:
         form = attach_estimated_degrees(form)
     # Propagate restrictions to terminals
