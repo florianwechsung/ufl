@@ -839,19 +839,46 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
             return dosum
 
     def reference_value(self, o):
-        # print("----")
-        # print("Call reference_value(self, ", o, ")")
-        for (w, v) in zip(self._w, self._v):
-            # print("v=", v)
-            # print("o=", o)
-            # print("w=", w)
-            if o == w and isinstance(v.ufl_operands[0], FormArgument):
-                # Case: d/dt [w + t v]
-                # print("return ", v)
-                return v
-        # print("Didn't differentiate ", o.ufl_operands[0])
-        return self.independent_terminal(o)
-        error("Currently no support for ReferenceValue in CoefficientDerivative.")
+        do = self._w2v.get(o)
+        if do is not None:
+            return do
+        # Look for o among coefficient derivatives
+        dos = self._cd.get(o)
+        if dos is None:
+            # If o is not among coefficient derivatives, return
+            # do/dw=0
+            do = Zero(o.ufl_shape)
+            return do
+        else:
+            # Compute do/dw_j = do/dw_h : v.
+            # Since we may actually have a tuple of oprimes and vs in a
+            # 'mixed' space, sum over them all to get the complete inner
+            # product. Using indices to define a non-compound inner product.
+
+            # Example:
+            # (f:g) -> (dfdu:v):g + f:(dgdu:v)
+            # shape(dfdu) == shape(f) + shape(v)
+            # shape(f) == shape(g) == shape(dfdu : v)
+
+            # Make sure we have a tuple to match the self._v tuple
+            if not isinstance(dos, tuple):
+                dos = (dos,)
+            if len(dos) != len(self._v):
+                error("Got a tuple of arguments, expecting a matching tuple of coefficient derivatives.")
+            dosum = Zero(o.ufl_shape)
+            for do, v in zip(dos, self._v):
+                so, oi = as_scalar(do)
+                rv = len(v.ufl_shape)
+                oi1 = oi[:-rv]
+                oi2 = oi[-rv:]
+                prod = so*v[oi2]
+                if oi1:
+                    dosum += as_tensor(prod, oi1)
+                else:
+                    dosum += prod
+            return dosum
+
+        # error("Currently no support for ReferenceValue in CoefficientDerivative.")
         # TODO: This is implementable for regular derivative(M(f),f,v)
         #       but too messy if customized coefficient derivative
         #       relations are given by the user.  We would only need
@@ -867,14 +894,13 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
         # else:
         #     return self.independent_terminal(o)
 
-    def reference_grad(self, o):
-        # print("----")
-        # print("Call reference_grad(self, ", o, ")")
+    def reference_grad(self, g):
+        o = g
         ngrads = 0
         while isinstance(o, ReferenceGrad):
             o, = o.ufl_operands
             ngrads += 1
-        if not isinstance(o.ufl_operands[0], FormArgument):
+        if not (isinstance(o, ReferenceValue) and isinstance(o.ufl_operands[0], FormArgument)):
             error("Expecting gradient of a FormArgument, not %s" % ufl_err_str(o))
 
         def apply_grads(f):
@@ -885,21 +911,91 @@ class GateauxDerivativeRuleset(GenericDerivativeRuleset):
         # Find o among all w without any indexing, which makes this
         # easy
         for (w, v) in zip(self._w, self._v):
-            # print("v=", v)
-            # print("o=", o)
-            # print("w=", w)
-            if o == w and isinstance(v.ufl_operands[0], FormArgument):
+            if o == w and isinstance(v, ReferenceValue) and isinstance(v.ufl_operands[0], FormArgument):
                 # Case: d/dt [w + t v]
-                # print("return ", apply_grads(v))
                 return apply_grads(v)
-        # print("Didn't differentiate ", o)
-        return self.independent_terminal(o)
-        error("Currently no support for ReferenceGrad in CoefficientDerivative.")
-        # TODO: This is implementable for regular derivative(M(f),f,v)
-        #       but too messy if customized coefficient derivative
-        #       relations are given by the user.  We would only need
-        #       this to allow the user to write
-        #       derivative(...ReferenceValue...,...).
+
+        gprimesum = Zero(g.ufl_shape)
+
+        def analyse_variation_argument(v):
+            # Analyse variation argument
+            if isinstance(v, ReferenceValue) and isinstance(v.ufl_operands[0], FormArgument):
+                # Case: d/dt [w[...] + t v]
+                vval, vcomp = v, ()
+            elif isinstance(v, Indexed):
+                # Case: d/dt [w + t v[...]]
+                # Case: d/dt [w[...] + t v[...]]
+                vval, vcomp = v.ufl_operands
+                vcomp = tuple(vcomp)
+            else:
+                error("Expecting ReferenceValue(argument) or component of ReferenceValue(argument).")
+            if not all(isinstance(k, FixedIndex) for k in vcomp):
+                error("Expecting only fixed indices in variation.")
+            return vval, vcomp
+
+        def compute_gprimeterm(ngrads, vval, vcomp, wshape, wcomp):
+            # Apply gradients directly to argument vval, and get the
+            # right indexed scalar component(s)
+            kk = indices(ngrads)
+            Dvkk = apply_grads(vval)[vcomp+kk]
+            # Place scalar component(s) Dvkk into the right tensor
+            # positions
+            if wshape:
+                Ejj, jj = unit_indexed_tensor(wshape, wcomp)
+            else:
+                Ejj, jj = 1, ()
+            gprimeterm = as_tensor(Ejj*Dvkk, jj+kk)
+            return gprimeterm
+
+        # Accumulate contributions from variations in different
+        # components
+        for (w, v) in zip(self._w, self._v):
+
+            # Analyse differentiation variable coefficient
+            if isinstance(w, ReferenceValue) and isinstance(w.ufl_operands[0], FormArgument):
+                if not w == o:
+                    continue
+                wshape = w.ufl_shape
+
+                if isinstance(v, ReferenceValue) and isinstance(v.ufl_operands[0], FormArgument):
+                    # Case: d/dt [w + t v]
+                    return apply_grads(v)
+
+                elif isinstance(v, ListTensor):
+                    # Case: d/dt [w + t <...,v,...>]
+                    for wcomp, vsub in unwrap_list_tensor(v):
+                        if not isinstance(vsub, Zero):
+                            vval, vcomp = analyse_variation_argument(vsub)
+                            gprimesum = gprimesum + compute_gprimeterm(ngrads, vval, vcomp, wshape, wcomp)
+
+                else:
+                    if wshape != ():
+                        error("Expecting scalar coefficient in this branch.")
+                    # Case: d/dt [w + t v[...]]
+                    wval, wcomp = w, ()
+
+                    vval, vcomp = analyse_variation_argument(v)
+                    gprimesum = gprimesum + compute_gprimeterm(ngrads, vval,
+                                                               vcomp, wshape,
+                                                               wcomp)
+
+            elif isinstance(w, Indexed):  # This path is tested in unit tests, but not actually used?
+                # Case: d/dt [w[...] + t v[...]]
+                # Case: d/dt [w[...] + t v]
+                wval, wcomp = w.ufl_operands
+                if not wval == o:
+                    continue
+                assert isinstance(wval, FormArgument)
+                if not all(isinstance(k, FixedIndex) for k in wcomp):
+                    error("Expecting only fixed indices in differentiation variable.")
+                wshape = wval.ufl_shape
+
+                vval, vcomp = analyse_variation_argument(v)
+                gprimesum = gprimesum + compute_gprimeterm(ngrads, vval, vcomp, wshape, wcomp)
+
+            else:
+                error("Expecting coefficient or component of coefficient.")
+        return gprimesum
 
     def grad(self, g):
         # If we hit this type, it has already been propagated to a
